@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subway Runner Game</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background-color: #111;
+            color: white;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        h1 { margin-bottom: 10px; font-size: 24px; color: #ffcc00; }
+        p { margin-bottom: 15px; color: #aaa; font-size: 14px; }
+        #gameContainer { position: relative; }
+        canvas {
+            background-color: #222;
+            border: 4px solid #444;
+            border-radius: 8px;
+            display: block;
+        }
+        #gameOverScreen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            display: none;
+            border-radius: 4px;
+        }
+        .btn {
+            background: #ffcc00;
+            color: #111;
+            border: none;
+            padding: 10px 20px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            margin-top: 15px;
+        }
+        .btn:hover { background: #ffa500; }
+    </style>
+</head>
+<body>
+
+    <h1>Subway Runner</h1>
+    <p>Controls: <b>Up Arrow</b> to Jump | <b>Down Arrow</b> to Duck</p>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        <div id="gameOverScreen">
+            <h2>GAME OVER</h2>
+            <p id="finalScore">Score: 0</p>
+            <button class="btn" onclick="resetGame()">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const gameOverScreen = document.getElementById("gameOverScreen");
+        const finalScoreText = document.getElementById("finalScore");
+
+        // Game State Variables
+        let gameActive = true;
+        let score = 0;
+        let gameSpeed = 5;
+        let obstacles = [];
+        let coins = [];
+        let frameCount = 0;
+
+        // Player Configuration
+        const player = {
+            x: 100,
+            y: 300,
+            width: 40,
+            height: 60,
+            originalHeight: 60,
+            duckHeight: 30,
+            color: "#ff3333",
+            vy: 0,
+            gravity: 0.6,
+            jumpForce: -14,
+            isGrounded: true,
+            isDucking: false
+        };
+
+        // Ground Level
+        const groundY = 360;
+
+        // Input Listeners
+        window.addEventListener("keydown", (e) => {
+            if (!gameActive) return;
+            
+            if ((e.key === "ArrowUp" || e.key === " ") && player.isGrounded && !player.isDucking) {
+                player.vy = player.jumpForce;
+                player.isGrounded = false;
+            }
+            if (e.key === "ArrowDown" && player.isGrounded) {
+                player.isDucking = true;
+                player.height = player.duckHeight;
+            }
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.key === "ArrowDown") {
+                player.isDucking = false;
+                player.height = player.originalHeight;
+            }
+        });
+
+        // Obstacle & Coin Spawning Logic
+        function spawnElements() {
+            if (frameCount % 120 === 0) {
+                let type = Math.random() > 0.5 ? "train" : "barrier";
+                if (type === "train") {
+                    // High obstacle: Requires ducking
+                    obstacles.push({
+                        x: canvas.width,
+                        y: groundY - 70,
+                        width: 50,
+                        height: 40,
+                        color: "#3333ff"
+                    });
+                } else {
+                    // Ground obstacle: Requires jumping
+                    obstacles.push({
+                        x: canvas.width,
+                        y: groundY - 40,
+                        width: 30,
+                        height: 40,
+                        color: "#ff9900"
+                    });
+                }
+            }
+
+            // Spawn Coins intermittently
+            if (frameCount % 80 === 0) {
+                let coinY = Math.random() > 0.5 ? groundY - 100 : groundY - 40;
+                coins.push({
+                    x: canvas.width,
+                    y: coinY,
+                    radius: 10,
+                    color: "#ffcc00",
+                    collected: false
+                });
+            }
+        }
+
+        // Standard Box Collision Checking
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // Circle-to-Box Collision Checking for Coins
+        function checkCoinCollision(player, coin) {
+            return coin.x > player.x && 
+                   coin.x < player.x + player.width && 
+                   coin.y > player.y && 
+                   coin.y < player.y + player.height;
+        }
+
+        // Primary Physics & Update Loop
+        function update() {
+            if (!gameActive) return;
+
+            frameCount++;
+            gameSpeed += 0.001; // Gradually increase difficulty
+
+            // Player Physics Engine
+            if (!player.isGrounded) {
+                player.vy += player.gravity;
+                player.y += player.vy;
+                
+                // Adjust position based on simulated ground line
+                let currentFloor = player.isDucking ? groundY - player.duckHeight : groundY - player.originalHeight;
+                if (player.y >= currentFloor) {
+                    player.y = currentFloor;
+                    player.vy = 0;
+                    player.isGrounded = true;
+                }
+            } else {
+                player.y = player.isDucking ? groundY - player.duckHeight : groundY - player.originalHeight;
+            }
+
+            // Process Obstacles
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].x -= gameSpeed;
+
+                // Game Over Evaluation
+                if (checkCollision(player, obstacles[i])) {
+                    gameActive = false;
+                    gameOverScreen.style.display = "flex";
+                    finalScoreText.innerText = "Score: " + score;
+                }
+
+                // Delete offscreen elements
+                if (obstacles[i].x + obstacles[i].width < 0) {
+                    obstacles.splice(i, 1);
+                    score += 10; // Earn points for dodging
+                }
+            }
+
+            // Process Coins
+            for (let i = coins.length - 1; i >= 0; i--) {
+                coins[i].x -= gameSpeed;
+
+                if (!coins[i].collected && checkCoinCollision(player, coins[i])) {
+                    coins[i].collected = true;
+                    score += 50; // High bonus for coin collection
+                }
+
+                if (coins[i].x < 0 || coins[i].collected) {
+                    coins.splice(i, 1);
+                }
+            }
+        }
+
+        // Render Canvas Visual Components
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Background Tracks
+            ctx.fillStyle = "#333";
+            ctx.fillRect(0, groundY, canvas.width, 4);
+            ctx.fillStyle = "#555";
+            ctx.fillRect(0, groundY + 15, canvas.width, 25);
+
+            // Draw Obstacles
+            obstacles.forEach(obs => {
+                ctx.fillStyle = obs.color;
+                ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+            });
+
+            // Draw Coins
+            coins.forEach(coin => {
+                ctx.beginPath();
+                ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+                ctx.fillStyle = coin.color;
+                ctx.fill();
+                ctx.closePath();
+            });
+
+            // Draw Character
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+
+            // Draw UI Stats Hud
+            ctx.fillStyle = "white";
+            ctx.font = "20px Arial";
+            ctx.fillText("Score: " + score, 20, 40);
+        }
+
+        // Global Loop Orchestrator
+        function gameLoop() {
+            spawnElements();
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialization Routine
+        function resetGame() {
+            gameActive = true;
+            score = 0;
+            gameSpeed = 5;
+            obstacles = [];
+            coins = [];
+            frameCount = 0;
+            player.y = groundY - player.originalHeight;
+            player.vy = 0;
+            player.isGrounded = true;
+            player.isDucking = false;
+            player.height = player.originalHeight;
+            gameOverScreen.style.display = "none";
+        }
+
+        // Execute Game
+        gameLoop();
+    </script>
+</body>
+</html>
